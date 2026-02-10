@@ -7,17 +7,17 @@ import pytz
 
 # Define Sectors and Top 5 Constituents
 SECTORS = {
-    "XLK": ["NVDA", "AAPL", "MSFT", "AVGO", "MU"],
-    "XLV": ["LLY", "JNJ", "ABBV", "UNH", "MRK"],
-    "XLF": ["BRK-B", "JPM", "V", "MA", "BAC"],
-    "XLY": ["AMZN", "TSLA", "HD", "MCD", "TJX"],
-    "XLP": ["WMT", "COST", "PG", "KO", "PM"],
+    "XLK": ["AAPL", "NVDA", "MSFT", "AVGO", "CRM"],
+    "XLV": ["LLY", "UNH", "JNJ", "ABBV", "MRK"],
+    "XLF": ["BRK-B", "JPM", "V", "MA", "GS"],
+    "XLY": ["AMZN", "TSLA", "HD", "MCD", "NKE"],
     "XLC": ["META", "GOOGL", "GOOG", "NFLX", "DIS"],
-    "XLE": ["XOM", "CVX", "COP", "WMB", "EOG"],
-    "XLI": ["GE", "CAT", "RTX", "BA", "UBER"],
-    "XLB": ["LIN", "NEM", "FCX", "SHW", "CRH"],
-    "XLU": ["NEE", "CEG", "SO", "DUK", "AEP"],
-    "XLRE": ["WELL", "PLD", "EQIX", "AMT", "SPG"]
+    "XLI": ["CAT", "GE", "UNP", "HON", "RTX"],
+    "XLP": ["PG", "COST", "KO", "PEP", "WMT"],
+    "XLE": ["XOM", "CVX", "COP", "SLB", "EOG"],
+    "XLRE": ["PLD", "AMT", "EQIX", "WELL", "PSA"],
+    "XLU": ["NEE", "SO", "DUK", "CEG", "SRE"],
+    "XLB": ["LIN", "APD", "SHW", "CTVA", "FCX"]
 }
 
 SECTOR_NAMES = {
