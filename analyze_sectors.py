@@ -322,12 +322,12 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         report.append(f"## {sec_name} ({ticker})")
         report.append(f"**判定**: {res['grade']}")
         
-        # Scenarios for Sector
-        sc = res['scenarios']
-        report.append("**想定シナリオ**:")
-        report.append(f"(普): {sc['Avg']}")
-        report.append(f"(良): {sc['Good']}")
-        report.append(f"(悪): {sc['Bad']}")
+        # Scenarios for Sector (Removed at user request)
+        # sc = res['scenarios']
+        # report.append("**想定シナリオ**:")
+        # report.append(f"(普): {sc['Avg']}")
+        # report.append(f"(良): {sc['Good']}")
+        # report.append(f"(悪): {sc['Bad']}")
         
         report.append(f"**Price**: ${res['start_p']:.2f} -> ${res['end_p']:.2f} ({res['return']:+.2f}%)")
         report.append(f"**直近**: {res['last_desc']}")
