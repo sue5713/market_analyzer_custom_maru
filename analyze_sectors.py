@@ -70,10 +70,10 @@ def filter_data_by_date(df, start_date_str=None, end_date_str=None):
     return filtered
 
 def analyze_last_day_shape(df):
-    if df.empty: return 0, "N/A", 0
+    if df.empty: return 0, "N/A", 0, 0, 0, 0, ""
     last_date = df.index[-1].date()
     last_day_df = df[df.index.date == last_date]
-    if last_day_df.empty: return 0, "N/A", 0
+    if last_day_df.empty: return 0, "N/A", 0, 0, 0, 0, ""
         
     open_p = last_day_df.iloc[0]['Open']
     close_p = last_day_df.iloc[-1]['Close']
@@ -82,7 +82,8 @@ def analyze_last_day_shape(df):
     
     move_pct = (close_p - open_p) / open_p * 100
     range_len = high_p - low_p
-    if range_len == 0: return 0, "Doji", move_pct
+    date_str = last_date.strftime("%m/%d")
+    if range_len == 0: return 0, "Doji", move_pct, open_p, high_p, close_p, date_str
     
     close_pos = (close_p - low_p) / range_len
     
@@ -105,7 +106,7 @@ def analyze_last_day_shape(df):
         desc = "保ち合い (Neut)"
         score = 0
         
-    return score, desc, move_pct
+    return score, desc, move_pct, open_p, high_p, close_p, last_date.strftime("%m/%d")
 
 def generate_three_scenarios(trend_return, last_score, last_move):
     """
@@ -183,19 +184,30 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
     
     start_p = df.iloc[0]['Open']
     end_p = df.iloc[-1]['Close']
+    high_p = df['High'].max()
+    
+    start_date_str = df.index[0].strftime("%m/%d")
+    end_date_str = df.index[-1].strftime("%m/%d")
+    
     ret = (end_p - start_p) / start_p * 100
-    score, desc, move = analyze_last_day_shape(df)
+    score, desc, move, l_open, l_high, l_close, l_date = analyze_last_day_shape(df)
     
     grade, scenarios = generate_three_scenarios(ret, score, move)
     
     return {
         "Ticker": ticker,
         "Start": start_p,
+        "High": high_p,
         "End": end_p,
         "Return": ret,
+        "DateRange": f"{start_date_str}-{end_date_str}",
         "LastScore": score,
         "LastDesc": desc,
         "LastMove": move,
+        "LastOpen": l_open,
+        "LastHigh": l_high,
+        "LastClose": l_close,
+        "LastDate": l_date,
         "Grade": grade,
         "Scenarios": scenarios
     }
@@ -250,8 +262,10 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
         "return": s_res['Return'],
         "start_p": s_res['Start'],
         "end_p": s_res['End'],
+        "date_range": s_res['DateRange'],
         "last_desc": s_res['LastDesc'],
         "last_move": s_res['LastMove'],
+        "last_date": s_res['LastDate'],
         "grade": s_res['Grade'],
         "scenarios": s_res['Scenarios'],
         "stats": stats_df
@@ -269,8 +283,8 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         name = SECTOR_NAMES.get(idx, idx)
         
         report.append(f"**{name} ({idx})**: {idx_res['Grade']}")
-        report.append(f"  Price: {idx_res['Start']:.2f} -> {idx_res['End']:.2f} ({idx_res['Return']:+.2f}%)")
-        report.append(f"  直近: {idx_res['LastDesc']} ({idx_res['LastMove']:+.1f}%)")
+        report.append(f"  Price: {idx_res['Start']:.2f} -> {idx_res['End']:.2f} ({idx_res['Return']:+.2f}%) [{idx_res['DateRange']}]")
+        report.append(f"  直近: {idx_res['LastDesc']} ({idx_res['LastMove']:+.1f}%) [{idx_res['LastDate']}]")
         
         # Drivers/Draggers Logic
         related_sectors = []
@@ -329,18 +343,24 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         # report.append(f"(良): {sc['Good']}")
         # report.append(f"(悪): {sc['Bad']}")
         
-        report.append(f"**Price**: ${res['start_p']:.2f} -> ${res['end_p']:.2f} ({res['return']:+.2f}%)")
-        report.append(f"**直近**: {res['last_desc']}")
+        report.append(f"**Price**: ${res['start_p']:.2f} -> ${res['end_p']:.2f} ({res['return']:+.2f}%) [{res['date_range']}]")
+        report.append(f"**直近**: {res['last_desc']} [{res['last_date']}]")
         
         if not engines.empty:
             report.append("🔥 **Engine (牽引)**:")
             for _, row in engines.iterrows():
-                report.append(f"- {row['Ticker']}: {row['Start']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%): {row['Reason']}")
+                # Ticker: [Trend] Start->High->End (+Ret%) / [Last] Start->High->End (+Ret%): Reason
+                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%)"
+                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%)"
+                report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
         
         if not brakes.empty:
             report.append("🧊 **Brake (重石)**:")
             for _, row in brakes.iterrows():
-                report.append(f"- {row['Ticker']}: {row['Start']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%): {row['Reason']}")
+                # Ticker: [Trend] Start->High->End (+Ret%) / [Last] Start->High->End (+Ret%): Reason
+                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%)"
+                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%)"
+                report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
         
         report.append("\n" + "-"*20 + "\n")
 
