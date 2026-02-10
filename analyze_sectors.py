@@ -349,17 +349,17 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         if not engines.empty:
             report.append("🔥 **Engine (牽引)**:")
             for _, row in engines.iterrows():
-                # Ticker: [Trend] Start->High->End (+Ret%) / [Last] Start->High->End (+Ret%): Reason
-                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%)"
-                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%)"
+                # Ticker: Trend: ... [Date] (Legend) / Last: ... [Date] (Legend) -> Reason
+                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [{row['DateRange']}] (始値->高値->終値)"
+                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
                 report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
         
         if not brakes.empty:
             report.append("🧊 **Brake (重石)**:")
             for _, row in brakes.iterrows():
-                # Ticker: [Trend] Start->High->End (+Ret%) / [Last] Start->High->End (+Ret%): Reason
-                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%)"
-                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%)"
+                # Ticker: Trend: ... [Date] (Legend) / Last: ... [Date] (Legend) -> Reason
+                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [{row['DateRange']}] (始値->高値->終値)"
+                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
                 report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
         
         report.append("\n" + "-"*20 + "\n")
