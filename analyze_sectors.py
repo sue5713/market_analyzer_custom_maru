@@ -107,51 +107,73 @@ def analyze_last_day_shape(df):
         
     return score, desc, move_pct
 
-def predict_future_scenario(trend_return, last_score, last_move):
+def generate_three_scenarios(trend_return, last_score, last_move):
     """
-    Generate a predictive scenario based on Trend (2 weeks) and Momentum (Last Day).
-    Returns: (Grade: 良/普/悪, Outlook Text)
+    Generate 3 distinct scenarios: Good (Bull), Avg (Base), Bad (Bear).
+    Returns: Grade, Scenarios Dict
     """
     grade = "普"
-    outlook = ""
+    scenarios = {
+        "Good": "",
+        "Avg": "",
+        "Bad": ""
+    }
     
     # 1. Strong Uptrend (>3%)
     if trend_return > 3.0:
-        if last_score >= 1:
+        if last_score >= 1: # Uptrend + Strong
             grade = "良"
-            outlook = "上昇トレンド継続。買い優勢。"
-        elif last_score <= -1:
+            scenarios["Avg"] = "上昇トレンド継続。高値更新を試す動き。"
+            scenarios["Good"] = "勢いが加速し、帯状に上昇する (Band Walk)。"
+            scenarios["Bad"] = "利益確定売りで一時的な調整が入る。"
+        elif last_score <= -1: # Uptrend + Weak
             grade = "普"
-            outlook = "上昇中だが直近で利益確定売り。調整警戒。"
-        else:
+            scenarios["Avg"] = "上昇一服。調整局面入りを示唆。"
+            scenarios["Good"] = "押し目を形成し、再度上昇に転じる。"
+            scenarios["Bad"] = "直近安値を割り込み、トレンドが崩れる。"
+        else: # Uptrend + Neutral
             grade = "良"
-            outlook = "上昇トレンド継続。押し目待ち。"
+            scenarios["Avg"] = "上昇トレンド継続。押し目待ち。"
+            scenarios["Good"] = "もみ合いを上放れし、再加速する。"
+            scenarios["Bad"] = "調整が長引き、レンジ相場へ移行する。"
             
     # 2. Strong Downtrend (<-3%)
     elif trend_return < -3.0:
-        if last_score >= 1:
+        if last_score >= 1: # Downtrend + Strong
             grade = "普"
-            outlook = "下落中だが直近で買い戻し。反発の兆し。"
-        elif last_score <= -1:
+            scenarios["Avg"] = "自律反発。ショートカバー優勢。"
+            scenarios["Good"] = "底打ちを確認し、本格的なリバウンドへ。"
+            scenarios["Bad"] = "あくまで一時的な反発で、再度安値を更新。"
+        elif last_score <= -1: # Downtrend + Weak
             grade = "悪"
-            outlook = "下落トレンド継続。売り優勢。"
+            scenarios["Avg"] = "下落継続。安値模索の展開。"
+            scenarios["Good"] = "セリングクライマックスを迎え、急反発する。"
+            scenarios["Bad"] = "売りが売りを呼び、パニック的な下げになる。"
         else:
             grade = "悪"
-            outlook = "下落トレンド継続。戻り売り警戒。"
+            scenarios["Avg"] = "下落トレンド継続。戻り売り警戒。"
+            scenarios["Good"] = "下げ止まり、底固めの動きへ。"
+            scenarios["Bad"] = "ジリジリと下値を切り下げる。"
             
     # 3. Range / Neutral
     else:
-        if last_score >= 1:
+        if last_score >= 1: # Range + Strong
             grade = "良"
-            outlook = "レンジ相場だが直近は強い。上値トライ。"
-        elif last_score <= -1:
+            scenarios["Avg"] = "レンジ上限へのトライ。"
+            scenarios["Good"] = "レンジを上抜け、新たな上昇トレンドへ。"
+            scenarios["Bad"] = "レンジ上限で跳ね返され、再度保ち合いへ。"
+        elif last_score <= -1: # Range + Weak
             grade = "悪"
-            outlook = "レンジ相場だが直近は弱い。下値模索。"
+            scenarios["Avg"] = "レンジ下限へのトライ。"
+            scenarios["Good"] = "下限でサポートされ、反発する。"
+            scenarios["Bad"] = "レンジを下抜け、下落トレンド入りする。"
         else:
             grade = "普"
-            outlook = "方向感なし。様子見。"
+            scenarios["Avg"] = "方向感なし。様子見。"
+            scenarios["Good"] = "材料出現で動意づく。"
+            scenarios["Bad"] = "出来高細り、閑散相場となる。"
             
-    return grade, outlook
+    return grade, scenarios
 
 def analyze_ticker(ticker, data, start_arg, end_arg):
     if ticker not in data.columns.levels[0]: return None
@@ -164,7 +186,7 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
     ret = (end_p - start_p) / start_p * 100
     score, desc, move = analyze_last_day_shape(df)
     
-    grade, outlook = predict_future_scenario(ret, score, move)
+    grade, scenarios = generate_three_scenarios(ret, score, move)
     
     return {
         "Ticker": ticker,
@@ -175,7 +197,7 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
         "LastDesc": desc,
         "LastMove": move,
         "Grade": grade,
-        "Outlook": outlook
+        "Scenarios": scenarios
     }
 
 def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
@@ -231,7 +253,7 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
         "last_desc": s_res['LastDesc'],
         "last_move": s_res['LastMove'],
         "grade": s_res['Grade'],
-        "outlook": s_res['Outlook'],
+        "scenarios": s_res['Scenarios'],
         "stats": stats_df
     }
 
@@ -246,7 +268,7 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         idx = idx_res['Ticker']
         name = SECTOR_NAMES.get(idx, idx)
         
-        report.append(f"**{name} ({idx})**: {idx_res['Grade']} - {idx_res['Outlook']}")
+        report.append(f"**{name} ({idx})**: {idx_res['Grade']}")
         report.append(f"  Price: {idx_res['Start']:.2f} -> {idx_res['End']:.2f} ({idx_res['Return']:+.2f}%)")
         report.append(f"  直近: {idx_res['LastDesc']} ({idx_res['LastMove']:+.1f}%)")
         
@@ -264,12 +286,17 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
                 sec_ret = results[sec_ticker]['return']
                 sec_name = results[sec_ticker]['name']
                 if sec_ret > idx_res['Return'] + 0.5:
-                    drivers.append(f"{sec_name}({sec_ret:+.1f}%)")
+                    drivers.append(f"- {sec_name}: {sec_ret:+.1f}%")
                 elif sec_ret < idx_res['Return'] - 0.5:
-                    draggers.append(f"{sec_name}({sec_ret:+.1f}%)")
+                    draggers.append(f"- {sec_name}: {sec_ret:+.1f}%")
                     
-        if drivers: report.append(f"- 寄与 (Drivers): {', '.join(drivers)}")
-        if draggers: report.append(f"- 足かせ (Draggers): {', '.join(draggers)}")
+        if drivers:
+            report.append("🔥 **Engine (牽引)**:")
+            report.extend(drivers)
+        if draggers: 
+            report.append("🧊 **Brake (重石)**:")
+            report.extend(draggers)
+        report.append("")
 
     report.append("="*40 + "\n")
     
@@ -281,10 +308,6 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
     # Macro Conclusion
     report.append("### ② マクロ結論: 資金流動")
     report.append(f"資金は**「{loser['name']}」から「{winner['name']}」へ**シフトしています。")
-    if winner['grade'] == "良" and loser['grade'] == "悪":
-        report.append("トレンドフォロー推奨 (Trend Following).")
-    elif winner['grade'] == "普" and loser['grade'] == "普":
-        report.append("転換点 (Turning Point) の可能性があります。")
     report.append("\n" + "-"*20 + "\n")
 
     for res in sorted_secs:
@@ -298,7 +321,14 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         
         report.append(f"## {sec_name} ({ticker})")
         report.append(f"**判定**: {res['grade']}")
-        report.append(f"**シナリオ**: {res['outlook']}")
+        
+        # Scenarios for Sector
+        sc = res['scenarios']
+        report.append("**想定シナリオ**:")
+        report.append(f"(普): {sc['Avg']}")
+        report.append(f"(良): {sc['Good']}")
+        report.append(f"(悪): {sc['Bad']}")
+        
         report.append(f"**Price**: ${res['start_p']:.2f} -> ${res['end_p']:.2f} ({res['return']:+.2f}%)")
         report.append(f"**直近**: {res['last_desc']}")
         
