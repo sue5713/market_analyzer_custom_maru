@@ -217,6 +217,13 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
     if not s_res: return None
     
     stats = []
+    
+    # Force minimal 5 stocks? We have 5 in holdings.
+    # We want to classify ALL 5 into Engine or Brake.
+    # Logic: 
+    #   Engine: Return > Sector Return (Leaders)
+    #   Brake: Return <= Sector Return (Laggards)
+    
     for stock in holdings:
         st_res = analyze_ticker(stock, data, start_arg, end_arg)
         if not st_res: continue
@@ -225,28 +232,19 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
         role = "NEUTRAL"
         reason = ""
         
-        # Determine Role
-        if rel_trend > 1.0:
+        # Forced Classification
+        if rel_trend > 0:
+            role = "ENGINE (牽引)"
             if st_res['LastScore'] >= 0:
-                role = "ENGINE (牽引)"
                 reason = f"トレンド牽引 (+{st_res['Return']:.1f}%)"
             else:
-                role = "ENGINE (牽引)"
                 reason = f"トレンドは強いが、直近で失速 ({st_res['LastDesc']})"
-        elif rel_trend < -1.0:
+        else:
+            role = "BRAKE (重石)"
             if st_res['LastScore'] > 0:
-                role = "BRAKE (重石)"
                 reason = f"出遅れだが、直近は買われている ({st_res['LastDesc']})"
             else:
-                role = "BRAKE (重石)"
                 reason = f"トレンドも直近も弱い ({st_res['LastDesc']})"
-        else:
-            if s_res['LastMove'] < -0.3 and st_res['LastMove'] > 0.3:
-                role = "ENGINE (牽引)"
-                reason = "セクター下落の中で逆行高"
-            elif s_res['LastMove'] > 0.3 and st_res['LastMove'] < -0.3:
-                role = "BRAKE (重石)"
-                reason = "セクター上昇についていけず失速"
                 
         st_res['Role'] = role
         st_res['Reason'] = reason
@@ -255,6 +253,26 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
     stats_df = pd.DataFrame(stats)
     if not stats_df.empty:
         stats_df = stats_df.sort_values("Return", ascending=False)
+        
+    # Calculate Fund Quality (Breadth)
+    # How many are Engines (Outperforming sector)?
+    # If 4-5: Broad participation (Healthy)
+    # If 1-2: Narrow participation (Selective)
+    current_engines = [s for s in stats if "ENGINE" in s['Role']]
+    engine_count = len(current_engines)
+    total_count = len(stats)
+    
+    quality = "普通 (Mixed)"
+    if total_count > 0:
+        ratio = engine_count / total_count
+        if ratio >= 0.8: # 4 or 5 out of 5
+            quality = "健全な広がり (Healthy)"
+        elif ratio <= 0.2: # 1 out of 5
+            quality = "一部への逃避 (Selective)"
+        elif ratio > 0.5:
+            quality = "やや広い (Broad)"
+        else:
+            quality = "選別色あり (Mixed)"
     
     return {
         "sector": sector_ticker,
@@ -267,6 +285,7 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
         "last_move": s_res['LastMove'],
         "last_date": s_res['LastDate'],
         "grade": s_res['Grade'],
+        "quality": quality,
         "scenarios": s_res['Scenarios'],
         "stats": stats_df
     }
@@ -320,8 +339,38 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
     loser = sorted_secs[-1]
 
     # Macro Conclusion
+    # Determine Risk Sentiment based on Tech/ConsDisc vs Utilities/Staples
+    risk_on_score = 0
+    if "XLK" in results and "XLY" in results:
+        risk_on_avg = (results["XLK"]["return"] + results["XLY"]["return"]) / 2
+        risk_off_avg = 0
+        count = 0
+        if "XLU" in results: 
+            risk_off_avg += results["XLU"]["return"]
+            count += 1
+        if "XLP" in results:
+            risk_off_avg += results["XLP"]["return"]
+            count += 1
+        
+        if count > 0:
+            risk_off_avg /= count
+            if risk_on_avg > risk_off_avg + 1.0:
+                risk_on_score = 1 # Risk On
+            elif risk_on_avg < risk_off_avg - 1.0:
+                risk_on_score = -1 # Risk Off
+    
+    flow_desc = ""
+    if risk_on_score == 1:
+        flow_desc = "成長株への資金回帰が見られ、市場心理は「リスク選好 (Risk On)」です。"
+    elif risk_on_score == -1:
+        flow_desc = "ディフェンシブセクターへの逃避が見られ、市場心理は「リスク回避 (Risk Off)」です。"
+    else:
+        flow_desc = "セクター間の循環色が強く、方向感を探る展開です。"
+
     report.append("### ② マクロ結論: 資金流動")
     report.append(f"資金は**「{loser['name']}」から「{winner['name']}」へ**シフトしています。")
+    report.append(f"【真実の眼】 {flow_desc}")
+    report.append(f"勝者({winner['name']})は{winner['quality']}な買いが入っており、敗者({loser['name']})は資金流出が鮮明です。")
     report.append("\n" + "-"*20 + "\n")
 
     for res in sorted_secs:
@@ -335,6 +384,7 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         
         report.append(f"## {sec_name} ({ticker})")
         report.append(f"**判定**: {res['grade']}")
+        report.append(f"**資金の質の判定**: {res['quality']}")
         
         # Scenarios for Sector (Removed at user request)
         # sc = res['scenarios']
@@ -376,7 +426,10 @@ def main():
     data = fetch_data()
     if data is None: return
 
-    end_dt = datetime.now()
+    # Use JST for default dates to align with user time (and correct US close relative to JST morning)
+    jst = pytz.timezone('Asia/Tokyo')
+    end_dt = datetime.now(jst)
+    
     if args.end: end_dt = pd.to_datetime(args.end)
     start_dt = end_dt - timedelta(days=args.days)
     if args.start: start_dt = pd.to_datetime(args.start)
