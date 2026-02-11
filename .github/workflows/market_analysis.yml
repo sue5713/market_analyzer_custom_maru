@@ -4,7 +4,14 @@ on:
   schedule:
     # 21:00 UTC = 06:00 JST (Mon-Fri)
     - cron: '0 21 * * 1-5'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Start Date (YYYY-MM-DD HH:MM)'
+        required: false
+      end_date:
+        description: 'End Date (YYYY-MM-DD HH:MM)'
+        required: false
 
 jobs:
   analyze_and_notify:
@@ -25,7 +32,12 @@ jobs:
         pip install -r requirements.txt
 
     - name: Run Market Analysis
-      run: python analyze_sectors.py --days 14
+      run: |
+        if [ -n "${{ inputs.start_date }}" ] && [ -n "${{ inputs.end_date }}" ]; then
+          python analyze_sectors.py --start "${{ inputs.start_date }}" --end "${{ inputs.end_date }}"
+        else
+          python analyze_sectors.py --days 14
+        fi
       
     - name: Send to LINE
       env:
