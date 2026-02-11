@@ -78,7 +78,7 @@ def filter_data_by_date(df, start_dt=None, end_dt=None):
     # Return in original TZ (convert back from UTC to NY usually)
     return df_utc.tz_convert("America/New_York")
 
-def analyze_last_day_shape(df):
+def analyze_last_day_shape(df, prev_close=None):
     if df.empty: return 0, "N/A", 0, 0, 0, 0, ""
     last_date = df.index[-1].date()
     last_day_df = df[df.index.date == last_date]
@@ -89,7 +89,10 @@ def analyze_last_day_shape(df):
     high_p = last_day_df['High'].max()
     low_p = last_day_df['Low'].min()
     
-    move_pct = (close_p - open_p) / open_p * 100
+    # Use Prev Close for % change if available, else Open (Intraday)
+    base_p = prev_close if prev_close is not None else open_p
+    move_pct = (close_p - base_p) / base_p * 100
+    
     range_len = high_p - low_p
     date_str = last_date.strftime("%m/%d")
     if range_len == 0: return 0, "Doji", move_pct, open_p, high_p, close_p, date_str
@@ -203,8 +206,19 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
     start_date_str = start_jst.strftime("%m/%d %H:%M")
     end_date_str = end_jst.strftime("%m/%d %H:%M")
     
+    # Calculate Previous Close for accurate Daily % Change
+    prev_close = None
+    try:
+        current_date = df.index[-1].date()
+        # Look at raw data strictly before the current day
+        past_data = raw[raw.index.date < current_date]
+        if not past_data.empty:
+            prev_close = past_data.iloc[-1]['Close']
+    except Exception:
+        pass
+
     ret = (end_p - start_p) / start_p * 100
-    score, desc, move, l_open, l_high, l_close, l_date = analyze_last_day_shape(df)
+    score, desc, move, l_open, l_high, l_close, l_date = analyze_last_day_shape(df, prev_close)
     
     grade, scenarios = generate_three_scenarios(ret, score, move)
     
