@@ -195,8 +195,13 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
     end_p = df.iloc[-1]['Close']
     high_p = df['High'].max()
     
-    start_date_str = df.index[0].strftime("%m/%d")
-    end_date_str = df.index[-1].strftime("%m/%d")
+    # Convert to JST for reporting
+    jst = pytz.timezone('Asia/Tokyo')
+    start_jst = df.index[0].astimezone(jst)
+    end_jst = df.index[-1].astimezone(jst)
+    
+    start_date_str = start_jst.strftime("%m/%d %H:%M")
+    end_date_str = end_jst.strftime("%m/%d %H:%M")
     
     ret = (end_p - start_p) / start_p * 100
     score, desc, move, l_open, l_high, l_close, l_date = analyze_last_day_shape(df)
@@ -209,14 +214,14 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
         "High": high_p,
         "End": end_p,
         "Return": ret,
-        "DateRange": f"{start_date_str}-{end_date_str}",
+        "DateRange": f"{start_date_str} - {end_date_str} JST",
         "LastScore": score,
         "LastDesc": desc,
         "LastMove": move,
         "LastOpen": l_open,
         "LastHigh": l_high,
         "LastClose": l_close,
-        "LastDate": l_date,
+        "LastDate": end_jst.strftime("%m/%d"), # Override with JST Date
         "Grade": grade,
         "Scenarios": scenarios
     }
@@ -302,7 +307,7 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
 def generate_narrative_report(results, index_results, start_dt, end_dt):
     report = []
     report.append("【天才投資家レポート】")
-    report.append(f"分析期間: {start_dt} 〜 {end_dt}\n")
+    report.append(f"分析期間: {start_dt} 〜 {end_dt} (JST)\n")
     
     # 1. Indices (Detailed)
     report.append("### ① 全体観 (Indices)")
