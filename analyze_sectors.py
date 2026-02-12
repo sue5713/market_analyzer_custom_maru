@@ -453,20 +453,29 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         report.append(f"**📊 リカバリー・ファクター (RF)**: {res['data']['RF']:.2f} | **最大ドローダウン (MDD)**: {res['data']['MDD']:.1f}%")
         report.append(f"**直近**: {res['data']['LastDesc']} [{res['data']['LastDate']}]")
         
+        # Date range for individual lines (short format)
+        short_date_range = f"[{start_dt.strftime('%m/%d')}-{end_dt.strftime('%m/%d')}]"
+        
         if not engines.empty:
             report.append("🔥 **Engine (牽引)**:")
             for _, row in engines.iterrows():
-                # Ticker: Trend: ... [RF:...] (Legend) / Last: ... [Date] (Legend) -> Reason
-                trend_str = f"Trend: {row['Start']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [リカバリー・ファクター (RF):{row['RF']:.2f}]"
-                last_str = f"Last: {row['LastMove']:+.1f}% [{row['LastDate']}]"
+                # Trend: Start->High->End (Return%) [Date] (Legend) [RF:...]
+                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) {short_date_range} (始値->高値->終値) [RF:{row['RF']:.2f}]"
+                
+                # Last: Open->High->Close (Move%) [Date] (Legend)
+                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
+                
                 report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
         
         if not brakes.empty:
             report.append("🧊 **Brake (重石)**:")
             for _, row in brakes.iterrows():
-                # Ticker: Trend: ... [RF:...] (Legend) / Last: ... [Date] (Legend) -> Reason
-                trend_str = f"Trend: {row['Start']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [リカバリー・ファクター (RF):{row['RF']:.2f}]"
-                last_str = f"Last: {row['LastMove']:+.1f}% [{row['LastDate']}]"
+                # Trend: Start->High->End (Return%) [Date] (Legend) [RF:...]
+                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) {short_date_range} (始値->高値->終値) [RF:{row['RF']:.2f}]"
+                
+                # Last: Open->High->Close (Move%) [Date] (Legend)
+                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
+                
                 report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
         
         report.append("\n" + "-"*20 + "\n")
