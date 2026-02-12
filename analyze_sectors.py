@@ -120,6 +120,19 @@ def analyze_last_day_shape(df, prev_close=None):
         
     return score, desc, move_pct, open_p, high_p, close_p, last_date.strftime("%m/%d")
 
+def calculate_max_drawdown(df):
+    """
+    Calculate Maximum Drawdown (MDD). 
+    MDD = Min((Price - Peak) / Peak)
+    Returns percentage (e.g. -5.0 for 5% drop).
+    """
+    # Use Close price for drawdown calculation
+    close_prices = df['Close']
+    rolling_max = close_prices.cummax()
+    drawdown = (close_prices - rolling_max) / rolling_max
+    max_drawdown = drawdown.min()
+    return max_drawdown * 100
+
 def generate_three_scenarios(trend_return, last_score, last_move):
     """
     Generate 3 distinct scenarios: Good (Bull), Avg (Base), Bad (Bear).
@@ -218,6 +231,17 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
         pass
 
     ret = (end_p - start_p) / start_p * 100
+    
+    # Calculate MDD and RF
+    mdd = calculate_max_drawdown(df) # This is negative percent e.g. -5.0
+    rf = 0.0
+    # RF = Return / |MDD|
+    if abs(mdd) > 0.001:
+        rf = ret / abs(mdd)
+    else:
+        # If MDD is effectively 0 (only went up), RF is technically infinite.
+        rf = 99.9
+
     score, desc, move, l_open, l_high, l_close, l_date = analyze_last_day_shape(df, prev_close)
     
     grade, scenarios = generate_three_scenarios(ret, score, move)
@@ -228,6 +252,8 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
         "High": high_p,
         "End": end_p,
         "Return": ret,
+        "MDD": mdd,
+        "RF": rf,
         "DateRange": f"{start_date_str} - {end_date_str} JST",
         "LastScore": score,
         "LastDesc": desc,
@@ -315,13 +341,14 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
         "grade": s_res['Grade'],
         "quality": quality,
         "scenarios": s_res['Scenarios'],
-        "stats": stats_df
+        "stats": stats_df,
+        "data": s_res
     }
 
 def generate_narrative_report(results, index_results, start_dt, end_dt):
     report = []
     report.append("【天才投資家レポート】")
-    report.append(f"分析期間: {start_dt} 〜 {end_dt} (JST)\n")
+    report.append(f"分析期間: {start_dt.strftime('%Y-%m-%d %H:%M')} 〜 {end_dt.strftime('%Y-%m-%d %H:%M')} (JST)\n")
     
     # 1. Indices (Detailed)
     report.append("### ① 全体観 (Indices)")
@@ -331,6 +358,7 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         
         report.append(f"**{name} ({idx})**: {idx_res['Grade']}")
         report.append(f"  Price: {idx_res['Start']:.2f} -> {idx_res['End']:.2f} ({idx_res['Return']:+.2f}%) [{idx_res['DateRange']}]")
+        report.append(f"  📊 リカバリー・ファクター (RF): {idx_res['RF']:.2f} | 最大ドローダウン (MDD): {idx_res['MDD']:.1f}%")
         report.append(f"  直近: {idx_res['LastDesc']} ({idx_res['LastMove']:+.1f}%) [{idx_res['LastDate']}]")
         
         # Drivers/Draggers Logic
@@ -421,26 +449,70 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         # report.append(f"(良): {sc['Good']}")
         # report.append(f"(悪): {sc['Bad']}")
         
-        report.append(f"**Price**: ${res['start_p']:.2f} -> ${res['end_p']:.2f} ({res['return']:+.2f}%) [{res['date_range']}]")
-        report.append(f"**直近**: {res['last_desc']} [{res['last_date']}]")
+        report.append(f"**Price**: ${res['data']['Start']:.2f} -> ${res['data']['End']:.2f} ({res['return']:+.2f}%) [{res['data']['DateRange']}]")
+        report.append(f"**📊 リカバリー・ファクター (RF)**: {res['data']['RF']:.2f} | **最大ドローダウン (MDD)**: {res['data']['MDD']:.1f}%")
+        report.append(f"**直近**: {res['data']['LastDesc']} [{res['data']['LastDate']}]")
         
         if not engines.empty:
             report.append("🔥 **Engine (牽引)**:")
             for _, row in engines.iterrows():
-                # Ticker: Trend: ... [Date] (Legend) / Last: ... [Date] (Legend) -> Reason
-                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [{row['DateRange']}] (始値->高値->終値)"
-                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
+                # Ticker: Trend: ... [RF:...] (Legend) / Last: ... [Date] (Legend) -> Reason
+                trend_str = f"Trend: {row['Start']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [リカバリー・ファクター (RF):{row['RF']:.2f}]"
+                last_str = f"Last: {row['LastMove']:+.1f}% [{row['LastDate']}]"
                 report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
         
         if not brakes.empty:
             report.append("🧊 **Brake (重石)**:")
             for _, row in brakes.iterrows():
-                # Ticker: Trend: ... [Date] (Legend) / Last: ... [Date] (Legend) -> Reason
-                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [{row['DateRange']}] (始値->高値->終値)"
-                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
+                # Ticker: Trend: ... [RF:...] (Legend) / Last: ... [Date] (Legend) -> Reason
+                trend_str = f"Trend: {row['Start']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [リカバリー・ファクター (RF):{row['RF']:.2f}]"
+                last_str = f"Last: {row['LastMove']:+.1f}% [{row['LastDate']}]"
                 report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
         
         report.append("\n" + "-"*20 + "\n")
+
+    # --- 3. RF Ranking Section ---
+    report.append("### ③ リカバリー・ファクター (RF) ランキング")
+    report.append("「リスクあたりのリターン効率」を比較します。数値が高いほど優秀です。\n")
+    
+    date_range_str = f"({start_dt.strftime('%m/%d')} - {end_dt.strftime('%m/%d')})"
+
+    # Sector Ranking
+    report.append(f"#### 【セクター別 RF ランキング】 {date_range_str}")
+    # Sort sectors by RF descending
+    sorted_sectors_rf = sorted(results.values(), key=lambda x: x['data']['RF'], reverse=True)
+    for i, res in enumerate(sorted_sectors_rf, 1):
+        rf_val = res['data']['RF']
+        mdd_val = res['data']['MDD']
+        ret_val = res['return']
+        icon = "🥇" if i==1 else "🥈" if i==2 else "🥉" if i==3 else f"{i}."
+        report.append(f"{icon} **{res['name']} ({res['sector']})**: RF {rf_val:.2f} (Return: {ret_val:+.1f}% / MDD: {mdd_val:.1f}%)")
+    
+    report.append(f"\n#### 【銘柄別 RF ランキング (Top 10)】 {date_range_str}")
+    # Collect all stocks from all stats
+    all_stocks = []
+    for res in results.values():
+        if 'stats' in res and not res['stats'].empty:
+            for _, row in res['stats'].iterrows():
+                 all_stocks.append(row)
+    
+    # Sort stocks by RF descending
+    # Convert list of Series to DataFrame for easier sorting if needed, but list sort is fine.
+    # row is a pandas Series, so accessing by key is fine.
+    sorted_stocks_rf = sorted(all_stocks, key=lambda x: x['RF'], reverse=True)
+    
+    # Top 10
+    for i, stock in enumerate(sorted_stocks_rf[:10], 1):
+        icon = "🥇" if i==1 else "🥈" if i==2 else "🥉" if i==3 else f"{i}."
+        report.append(f"{icon} **{stock['Ticker']}**: RF {stock['RF']:.2f} (Return: {stock['Return']:+.1f}% / MDD: {stock['MDD']:.1f}%)")
+    
+    report.append(f"\n#### 【銘柄別 RF ワースト (Bottom 5)】 {date_range_str}")
+    # Bottom 5 (Worst RF)
+    for i, stock in enumerate(sorted_stocks_rf[-5:], 1):
+        # Reverse index for display? No, just list them.
+        report.append(f"💀 **{stock['Ticker']}**: RF {stock['RF']:.2f} (Return: {stock['Return']:+.1f}% / MDD: {stock['MDD']:.1f}%)")
+        
+    report.append("\n" + "="*40 + "\n")
 
     return "\n".join(report)
 
@@ -506,7 +578,7 @@ def main():
             if res: sec_results[sector] = res
             
         if sec_results:
-            report_text = generate_narrative_report(sec_results, index_res, s_dt.strftime("%Y-%m-%d %H:%M"), e_dt.strftime("%Y-%m-%d %H:%M"))
+            report_text = generate_narrative_report(sec_results, index_res, s_dt, e_dt)
             return report_text
         return "No data found for this range."
 
