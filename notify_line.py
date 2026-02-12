@@ -62,28 +62,42 @@ def main():
     # Each sector is relatively small, maybe we can group 2-3 sectors per message?
     # User said: "dot line de kugitte aru naiyou goto ni wakete" -> Split by dotted line content.
     
+    # Group chunks to save quota (Max 5000 chars/msg, target ~4000)
     messages_to_send = []
+    current_buffer = ""
+    MAX_LENGTH = 4000
     
-    # Cleaning up chunks
     for chunk in raw_chunks:
         clean_chunk = chunk.strip()
-        if clean_chunk:
-            messages_to_send.append(clean_chunk)
+        if not clean_chunk: continue
+        
+        # Re-add the delimiter for visual separation within the message
+        # (Except for the very last one, but simpler to just add it)
+        formatted_chunk = clean_chunk + "\n\n" + "-"*20 + "\n\n"
+        
+        if len(current_buffer) + len(formatted_chunk) > MAX_LENGTH:
+            # Current buffer is full, save it
+            messages_to_send.append(current_buffer.strip())
+            current_buffer = formatted_chunk
+        else:
+            current_buffer += formatted_chunk
+            
+    if current_buffer:
+        messages_to_send.append(current_buffer.strip())
 
-    print(f"Total messages to send: {len(messages_to_send)}")
+    print(f"Total messages to send: {len(messages_to_send)} (Optimized from {len(raw_chunks)})")
     
     for i, msg in enumerate(messages_to_send):
         print(f"Sending message {i+1}/{len(messages_to_send)}...")
         
-        # Add page counter for clarity
+        # Add page counter
         header = f"({i+1}/{len(messages_to_send)})\n"
         final_msg = header + msg
         
-        # Check logic: if message is too long (>2000), we still need to split it
-        if len(final_msg) > 2000:
-            # Fallback to simple split if a single section is huge (unlikely for sector analysis)
-             print("Warning: Message too long, truncating/splitting...")
-             # For now, just send it, LINE might reject if > 5000 chars. 2000 is a safe limit.
+        # Safety check for 5000 limit
+        if len(final_msg) > 5000:
+             print("Warning: Message > 5000 chars! Truncating to 5000.")
+             final_msg = final_msg[:5000]
         
         success = send_line_push(final_msg, access_token, user_id)
         if not success:
