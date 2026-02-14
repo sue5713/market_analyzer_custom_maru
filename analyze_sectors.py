@@ -28,59 +28,116 @@ SECTOR_NAMES = {
 }
 
 INDICES = ["QQQ", "SPY", "DIA"]
+MACRO_TICKERS = ["GLD", "FXY", "UUP", "TLT"]
+MACRO_NAMES = {
+    "GLD": "ゴールド (Gold)",
+    "FXY": "日本円 (Yen)",
+    "UUP": "ドル指数 (USD)",
+    "TLT": "米国債20年超 (Bonds)"
+}
 
-def fetch_data():
+def fetch_data(start_str=None, end_str=None):
     all_tickers = []
     for sector, stocks in SECTORS.items():
         all_tickers.append(sector)
         all_tickers.extend(stocks)
     all_tickers.extend(INDICES)
+    all_tickers.extend(MACRO_TICKERS)
     
     all_tickers = list(set(all_tickers))
-    print(f"Fetching data for {len(all_tickers)} tickers (1mo history, 15m interval)...")
+    
+    # Determine interval and period based on start_date
+    interval = "15m"
+    use_period = False
+    
+    if start_str:
+        try:
+            start_dt = pd.to_datetime(start_str)
+            days_ago = (datetime.now() - start_dt).days
+            if days_ago > 59:
+                interval = "1d"
+                print(f"Start date is {days_ago} days ago. Switching to daily interval (1d).")
+        except:
+            pass
+    else:
+        use_period = True
+
+    print(f"Fetching data for {len(all_tickers)} tickers (Interval: {interval})...")
     
     try:
-        data = yf.download(all_tickers, period="1mo", interval="15m", group_by='ticker', auto_adjust=True, threads=True)
+        if use_period:
+            data = yf.download(all_tickers, period="1mo", interval="15m", group_by='ticker', auto_adjust=True, threads=True)
+        else:
+            # yfinance expects end date to be exclusive, so add 1 day to cover the full end date if needed, 
+            # but usually for 'end' arg provided by user we assume it includes that day? 
+            # actually yfinance download 'end' is exclusive. 
+            # Converting string to datetime to add offset safely
+            s_dt = pd.to_datetime(start_str)
+            e_dt = pd.to_datetime(end_str) + timedelta(days=1)
+            
+            data = yf.download(all_tickers, start=s_dt.strftime("%Y-%m-%d"), end=e_dt.strftime("%Y-%m-%d"), interval=interval, group_by='ticker', auto_adjust=True, threads=True)
+            
         return data
     except Exception as e:
         print(f"Error fetching data: {e}")
         return None
 
-def filter_data_by_date(df, start_dt=None, end_dt=None):
+def filter_data_by_date(df, start_date_str=None, end_date_str=None):
     if df is None or df.empty: return df
     filtered = df.copy()
+    is_tz_aware = filtered.index.tzinfo is not None
+    timezone = pytz.timezone("America/New_York")
     
-    # Ensure index is timezone-aware (yfinance usually returns NY time, or UTC)
-    # If not, assume NY
-    if filtered.index.tzinfo is None:
-        filtered.index = filtered.index.tz_localize("America/New_York")
-    
-    # Convert dataframe index to JST for easier comparison validation by user? 
-    # Or convert Input (JST) to DataFrame's TZ (likely America/New_York)
-    
-    # Best practice: Convert everything to UTC for comparison
-    df_utc = filtered.tz_convert("UTC")
-    
-    if start_dt:
-        # Ensure start_dt is aware
-        if start_dt.tzinfo is None:
-             # If passed as naive, assume JST as per main() logic or handle gracefully
-             start_dt = pytz.timezone('Asia/Tokyo').localize(start_dt)
-        start_utc = start_dt.astimezone(pytz.UTC)
-        df_utc = df_utc[df_utc.index >= start_utc]
+    if start_date_str:
+        try:
+            start_dt = pd.to_datetime(start_date_str)
+            if is_tz_aware and start_dt.tzinfo is None:
+                start_dt = timezone.localize(start_dt)
+            filtered = filtered[filtered.index >= start_dt]
+        except: pass
 
-    if end_dt:
-        if end_dt.tzinfo is None:
-             end_dt = pytz.timezone('Asia/Tokyo').localize(end_dt)
-        end_utc = end_dt.astimezone(pytz.UTC)
-        df_utc = df_utc[df_utc.index <= end_utc]
+    if end_date_str:
+        try:
+            end_dt = pd.to_datetime(end_date_str)
+            if is_tz_aware and end_dt.tzinfo is None:
+                end_dt = timezone.localize(end_dt)
+            filtered = filtered[filtered.index <= end_dt]
+        except: pass
+    return filtered
+
+def calculate_mdd_rf(df):
+    """
+    Calculate Maximum Drawdown (MDD) and Recovery Factor (RF).
+    MDD: Max percentage drop from peak to trough within the period.
+    RF: Net Return / |MDD|.
+    """
+    if df.empty: return 0.0, 0.0
+
+    # Calculate High water mark
+    roll_max = df['High'].cummax()
+    # Drawdown = (Low - HighWaterMark) / HighWaterMark
+    daily_dd = (df['Low'] - roll_max) / roll_max
+    mdd = daily_dd.min() # This is a negative float, e.g. -0.05 for -5%
     
-    # Return in original TZ (convert back from UTC to NY usually)
-    return df_utc.tz_convert("America/New_York")
+    # Return for the period
+    start_p = df.iloc[0]['Open']
+    end_p = df.iloc[-1]['Close']
+    ret = (end_p - start_p) / start_p # Float, e.g. 0.10 for 10%
+
+    # RF Calculation
+    rf = 0.0
+    if mdd == 0:
+        if ret > 0: rf = 99.99 # Infinite recovery (no drawdown)
+        else: rf = 0.0 # No return, no drawdown
+    else:
+        rf = ret / abs(mdd)
+        
+    return mdd * 100, rf # Return MDD as percentage (negative) and RF (ratio)
 
 def analyze_last_day_shape(df, prev_close=None):
     if df.empty: return 0, "N/A", 0, 0, 0, 0, ""
     last_date = df.index[-1].date()
+    # Handle duplicate indices if any, or strictly filter by date
     last_day_df = df[df.index.date == last_date]
     if last_day_df.empty: return 0, "N/A", 0, 0, 0, 0, ""
         
@@ -118,20 +175,7 @@ def analyze_last_day_shape(df, prev_close=None):
         desc = "保ち合い (Neut)"
         score = 0
         
-    return score, desc, move_pct, open_p, high_p, close_p, last_date.strftime("%m/%d")
-
-def calculate_max_drawdown(df):
-    """
-    Calculate Maximum Drawdown (MDD). 
-    MDD = Min((Price - Peak) / Peak)
-    Returns percentage (e.g. -5.0 for 5% drop).
-    """
-    # Use Close price for drawdown calculation
-    close_prices = df['Close']
-    rolling_max = close_prices.cummax()
-    drawdown = (close_prices - rolling_max) / rolling_max
-    max_drawdown = drawdown.min()
-    return max_drawdown * 100
+    return score, desc, move_pct, open_p, high_p, close_p, date_str
 
 def generate_three_scenarios(trend_return, last_score, last_move):
     """
@@ -202,8 +246,17 @@ def generate_three_scenarios(trend_return, last_score, last_move):
     return grade, scenarios
 
 def analyze_ticker(ticker, data, start_arg, end_arg):
-    if ticker not in data.columns.levels[0]: return None
-    raw = data[ticker].dropna()
+    try:
+        if ticker not in data.columns.levels[0]: return None
+        raw = data[ticker].dropna()
+    except KeyError:
+        return None
+    except Exception as e:
+        # Fallback for flat index if only one ticker or other structure
+        if ticker in data.columns:
+            raw = data[ticker].dropna()
+        else:
+            return None
     df = filter_data_by_date(raw, start_arg, end_arg)
     if df.empty: return None
     
@@ -211,13 +264,22 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
     end_p = df.iloc[-1]['Close']
     high_p = df['High'].max()
     
-    # Convert to JST for reporting
+    # Convert timestamps to JST for display
     jst = pytz.timezone('Asia/Tokyo')
-    start_jst = df.index[0].astimezone(jst)
-    end_jst = df.index[-1].astimezone(jst)
+    first_ts = df.index[0]
+    last_ts = df.index[-1]
     
-    start_date_str = start_jst.strftime("%m/%d %H:%M")
-    end_date_str = end_jst.strftime("%m/%d %H:%M")
+    if first_ts.tzinfo is not None:
+        first_jst = first_ts.astimezone(jst)
+        last_jst = last_ts.astimezone(jst)
+        start_date_str = first_jst.strftime("%m/%d %H:%M")
+        end_date_str = last_jst.strftime("%m/%d %H:%M") + " JST"
+    else:
+        # For daily data (no timezone info), just show date
+        start_date_str = first_ts.strftime("%m/%d")
+        end_date_str = last_ts.strftime("%m/%d")
+    
+    ret = (end_p - start_p) / start_p * 100
     
     # Calculate Previous Close for accurate Daily % Change
     prev_close = None
@@ -230,21 +292,11 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
     except Exception:
         pass
 
-    ret = (end_p - start_p) / start_p * 100
-    
-    # Calculate MDD and RF
-    mdd = calculate_max_drawdown(df) # This is negative percent e.g. -5.0
-    rf = 0.0
-    # RF = Return / |MDD|
-    if abs(mdd) > 0.001:
-        rf = ret / abs(mdd)
-    else:
-        # If MDD is effectively 0 (only went up), RF is technically infinite.
-        rf = 99.9
-
     score, desc, move, l_open, l_high, l_close, l_date = analyze_last_day_shape(df, prev_close)
     
     grade, scenarios = generate_three_scenarios(ret, score, move)
+    
+    mdd, rf = calculate_mdd_rf(df)
     
     return {
         "Ticker": ticker,
@@ -252,18 +304,18 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
         "High": high_p,
         "End": end_p,
         "Return": ret,
-        "MDD": mdd,
-        "RF": rf,
-        "DateRange": f"{start_date_str} - {end_date_str} JST",
+        "DateRange": f"{start_date_str} - {end_date_str}",
         "LastScore": score,
         "LastDesc": desc,
         "LastMove": move,
         "LastOpen": l_open,
         "LastHigh": l_high,
         "LastClose": l_close,
-        "LastDate": end_jst.strftime("%m/%d"), # Override with JST Date
+        "LastDate": l_date,
         "Grade": grade,
-        "Scenarios": scenarios
+        "Scenarios": scenarios,
+        "MDD": mdd,
+        "RF": rf
     }
 
 def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
@@ -342,13 +394,22 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
         "quality": quality,
         "scenarios": s_res['Scenarios'],
         "stats": stats_df,
-        "data": s_res
+        "MDD": s_res['MDD'],
+        "RF": s_res['RF']
     }
 
-def generate_narrative_report(results, index_results, start_dt, end_dt):
+def generate_narrative_report(results, index_results, macro_results, start_dt_str, end_dt_str):
+    # Use actual analyzed range from one of the results if possible for more precision
+    analyzed_range = f"{start_dt_str} 〜 {end_dt_str}"
+    if index_results:
+        # Extract existing range from index result, assuming format "MM/DD HH:MM - MM/DD HH:MM JST"
+        # But here start_dt_str is YYYY-MM-DD. 
+        # analyze_ticker returns DateRange in detailed format.
+        analyzed_range = index_results[0]['DateRange'] 
+
     report = []
     report.append("【天才投資家レポート】")
-    report.append(f"分析期間: {start_dt.strftime('%Y-%m-%d %H:%M')} 〜 {end_dt.strftime('%Y-%m-%d %H:%M')} (JST)\n")
+    report.append(f"分析期間: {analyzed_range}\n")
     
     # 1. Indices (Detailed)
     report.append("### ① 全体観 (Indices)")
@@ -358,7 +419,7 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         
         report.append(f"**{name} ({idx})**: {idx_res['Grade']}")
         report.append(f"  Price: {idx_res['Start']:.2f} -> {idx_res['End']:.2f} ({idx_res['Return']:+.2f}%) [{idx_res['DateRange']}]")
-        report.append(f"  📊 リカバリー・ファクター (RF): {idx_res['RF']:.2f} | 最大ドローダウン (MDD): {idx_res['MDD']:.1f}%")
+        report.append(f"  📊 **リカバリー・ファクター (RF): {idx_res['RF']:.2f}** | **最大ドローダウン (MDD): {idx_res['MDD']:.1f}%**")
         report.append(f"  直近: {idx_res['LastDesc']} ({idx_res['LastMove']:+.1f}%) [{idx_res['LastDate']}]")
         
         # Drivers/Draggers Logic
@@ -434,7 +495,6 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         ticker = res['sector']
         stats = res['stats']
         
-        # Determine Breadth/Quality
         engines = stats[stats['Role'].str.contains('ENGINE')]
         brakes = stats[stats['Role'].str.contains('BRAKE')]
         
@@ -442,161 +502,141 @@ def generate_narrative_report(results, index_results, start_dt, end_dt):
         report.append(f"**判定**: {res['grade']}")
         report.append(f"**資金の質の判定**: {res['quality']}")
         
-        # Scenarios for Sector (Removed at user request)
-        # sc = res['scenarios']
-        # report.append("**想定シナリオ**:")
-        # report.append(f"(普): {sc['Avg']}")
-        # report.append(f"(良): {sc['Good']}")
-        # report.append(f"(悪): {sc['Bad']}")
-        
-        report.append(f"**Price**: ${res['data']['Start']:.2f} -> ${res['data']['End']:.2f} ({res['return']:+.2f}%) [{res['data']['DateRange']}]")
-        report.append(f"**📊 リカバリー・ファクター (RF)**: {res['data']['RF']:.2f} | **最大ドローダウン (MDD)**: {res['data']['MDD']:.1f}%")
-        report.append(f"**直近**: {res['data']['LastDesc']} [{res['data']['LastDate']}]")
-        
-        # Date range for individual lines (short format)
-        short_date_range = f"[{start_dt.strftime('%m/%d')}-{end_dt.strftime('%m/%d')}]"
+        report.append(f"**Price**: ${res['start_p']:.2f} -> ${res['end_p']:.2f} ({res['return']:+.2f}%) [{res['date_range']}]")
+        report.append(f"📊 **リカバリー・ファクター (RF): {res['RF']:.2f}** | **最大ドローダウン (MDD): {res['MDD']:.1f}%**")
+        report.append(f"**直近**: {res['last_desc']} [{res['last_date']}]")
         
         if not engines.empty:
             report.append("🔥 **Engine (牽引)**:")
             for _, row in engines.iterrows():
-                # Trend: Start->High->End (Return%) [Date] (Legend) [RF:...]
-                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) {short_date_range} (始値->高値->終値) [RF:{row['RF']:.2f}]"
-                
-                # Last: Open->High->Close (Move%) [Date] (Legend)
+                # Ticker: Trend: ... [RF:X.XX] / Last: ... -> Reason
+                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [{row['DateRange']}] (始値->高値->終値) **[RF:{row['RF']:.2f}]**"
                 last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
-                
                 report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
         
         if not brakes.empty:
             report.append("🧊 **Brake (重石)**:")
             for _, row in brakes.iterrows():
-                # Trend: Start->High->End (Return%) [Date] (Legend) [RF:...]
-                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) {short_date_range} (始値->高値->終値) [RF:{row['RF']:.2f}]"
-                
-                # Last: Open->High->Close (Move%) [Date] (Legend)
+                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [{row['DateRange']}] (始値->高値->終値) **[RF:{row['RF']:.2f}]**"
                 last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
-                
                 report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
         
         report.append("\n" + "-"*20 + "\n")
 
-    # --- 3. RF Ranking Section ---
+    # 3. Rankings Section
+    report.append("### ④ リカバリー・ファクター (RF) ランキング") # Fixed numbering to ④? User snippet had ③ but usually Macro is after?
+    # Wait, the user's snippet text had:
+    # ### ③ リカバリー・ファクター (RF) ランキング
+    # ...
+    # ### ④ 注目マクロ指標 (Macro)
+    # So I should keep it as ③
+    
     report.append("### ③ リカバリー・ファクター (RF) ランキング")
     report.append("「リスクあたりのリターン効率」を比較します。数値が高いほど優秀です。\n")
     
-    date_range_str = f"({start_dt.strftime('%m/%d')} - {end_dt.strftime('%m/%d')})"
-
     # Sector Ranking
-    report.append(f"#### 【セクター別 RF ランキング】 {date_range_str}")
-    # Sort sectors by RF descending
-    sorted_sectors_rf = sorted(results.values(), key=lambda x: x['data']['RF'], reverse=True)
-    for i, res in enumerate(sorted_sectors_rf, 1):
-        rf_val = res['data']['RF']
-        mdd_val = res['data']['MDD']
-        ret_val = res['return']
-        icon = "🥇" if i==1 else "🥈" if i==2 else "🥉" if i==3 else f"{i}."
-        report.append(f"{icon} **{res['name']} ({res['sector']})**: RF {rf_val:.2f} (Return: {ret_val:+.1f}% / MDD: {mdd_val:.1f}%)")
+    sorted_rf_sectors = sorted(results.values(), key=lambda x: x['RF'], reverse=True)
+    report.append("【セクター別 RF ランキング】")
+    rank_str_list = []
+    medals = ["🥇", "🥈", "🥉"]
+    for i, res in enumerate(sorted_rf_sectors):
+        rank_icon = medals[i] if i < 3 else f"{i+1}."
+        rank_str_list.append(f"{rank_icon} **{res['name']} ({res['sector']})**: RF {res['RF']:.2f} (Return: {res['return']:+.1f}% / MDD: {res['MDD']:.1f}%)")
+    report.append(" ".join(rank_str_list))
+    report.append("")
     
-    report.append(f"\n#### 【銘柄別 RF ランキング (Top 10)】 {date_range_str}")
-    # Collect all stocks from all stats
+    # Stock Ranking
     all_stocks = []
     for res in results.values():
-        if 'stats' in res and not res['stats'].empty:
+        if not res['stats'].empty:
             for _, row in res['stats'].iterrows():
-                 all_stocks.append(row)
+                all_stocks.append(row)
     
-    # Sort stocks by RF descending
-    # Convert list of Series to DataFrame for easier sorting if needed, but list sort is fine.
-    # row is a pandas Series, so accessing by key is fine.
+    # Sort all stocks by RF
     sorted_stocks_rf = sorted(all_stocks, key=lambda x: x['RF'], reverse=True)
+    top_10 = sorted_stocks_rf[:10]
+    bottom_5 = sorted_stocks_rf[-5:]
     
-    # Top 10
-    for i, stock in enumerate(sorted_stocks_rf[:10], 1):
-        icon = "🥇" if i==1 else "🥈" if i==2 else "🥉" if i==3 else f"{i}."
-        report.append(f"{icon} **{stock['Ticker']}**: RF {stock['RF']:.2f} (Return: {stock['Return']:+.1f}% / MDD: {stock['MDD']:.1f}%)")
+    report.append("【銘柄別 RF ランキング (Top 10)】")
+    top_str_list = []
+    for i, row in enumerate(top_10):
+        rank_icon = medals[i] if i < 3 else f"{i+1}."
+        top_str_list.append(f"{rank_icon} **{row['Ticker']}**: RF {row['RF']:.2f} (Return: {row['Return']:+.1f}% / MDD: {row['MDD']:.1f}%)")
+    report.append(" ".join(top_str_list))
+    report.append("")
     
-    report.append(f"\n#### 【銘柄別 RF ワースト (Bottom 5)】 {date_range_str}")
-    # Bottom 5 (Worst RF)
-    for i, stock in enumerate(sorted_stocks_rf[-5:], 1):
-        # Reverse index for display? No, just list them.
-        report.append(f"💀 **{stock['Ticker']}**: RF {stock['RF']:.2f} (Return: {stock['Return']:+.1f}% / MDD: {stock['MDD']:.1f}%)")
-        
+    report.append("【銘柄別 RF ワースト (Bottom 5)】")
+    btm_str_list = []
+    for row in bottom_5:
+        btm_str_list.append(f"💀 **{row['Ticker']}**: RF {row['RF']:.2f} (Return: {row['Return']:+.1f}% / MDD: {row['MDD']:.1f}%)")
+    report.append(" ".join(btm_str_list))
+    
     report.append("\n" + "="*40 + "\n")
 
+    # 4. Macro Section
+    report.append("### ④ 注目マクロ指標 (Macro)")
+    for res in macro_results:
+        m_ticker = res['Ticker']
+        m_name = MACRO_NAMES.get(m_ticker, m_ticker)
+        report.append(f"**{m_name} ({m_ticker})**: {res['Return']:+.2f}%")
+        report.append(f"  Price: {res['Start']:.2f} -> {res['End']:.2f} [{res['DateRange']}]")
+        report.append(f"  直近: {res['LastDesc']} ({res['LastMove']:+.2f}%) [{res['LastDate']}]")
+        # Added RF/MDD based on user sample output if needed, but user didn't explicitly ask for it in the text sample
+        # Wait, the user text:
+        # ### ④ 注目マクロ指標 (Macro)
+        # **ゴールド (GLD)**: +2.00%
+        # ...
+        # The user's Python Code had:
+        # report.append(f"  RF: {res['RF']:.2f} | MDD: {res['MDD']:.1f}%")
+        # So I will include it.
+        report.append(f"  RF: {res['RF']:.2f} | MDD: {res['MDD']:.1f}%")
+        report.append("")
+    
     return "\n".join(report)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--start', type=str, help='Start datetime (YYYY-MM-DD HH:MM) in JST')
-    parser.add_argument('--end', type=str, help='End datetime (YYYY-MM-DD HH:MM) in JST')
+    parser.add_argument('--start', type=str)
+    parser.add_argument('--end', type=str)
     parser.add_argument('--days', type=int, default=14)
     args = parser.parse_args()
-    
-    data = fetch_data()
-    if data is None: return
 
+    # Use JST for default dates to align with user time (and correct US close relative to JST morning)
     jst = pytz.timezone('Asia/Tokyo')
-    
-    # Default end is Now (JST)
     end_dt = datetime.now(jst)
     
-    # Logic for customized time range
-    if args.end:
-        # User provides 'YYYY-MM-DD HH:MM' in JST
-        try:
-            # Parse argument as specific time
-            local_dt = datetime.strptime(args.end, "%Y-%m-%d %H:%M")
-            end_dt = jst.localize(local_dt)
-        except ValueError:
-            # Fallback for simple date
-            end_dt = pd.to_datetime(args.end).tz_localize(jst)
-
-    # Default start is end - days
+    if args.end: end_dt = pd.to_datetime(args.end)
     start_dt = end_dt - timedelta(days=args.days)
-    
-    if args.start:
-        try:
-            local_dt = datetime.strptime(args.start, "%Y-%m-%d %H:%M")
-            start_dt = jst.localize(local_dt)
-        except ValueError:
-            start_dt = pd.to_datetime(args.start).tz_localize(jst)
+    if args.start: start_dt = pd.to_datetime(args.start)
         
-    start_str = start_dt.strftime("%Y-%m-%d %H:%M")
-    end_str = end_dt.strftime("%Y-%m-%d %H:%M")
+    start_str = start_dt.strftime("%Y-%m-%d")
+    end_str = end_dt.strftime("%Y-%m-%d")
     
-    # Convert JST datetimes to string for filter function (which checks against index)
-    # The filter_data_by_date expects strings that pd.to_datetime can handle, or we can pass naive UTC?
-    # Actually, yfinance index is usually America/New_York localized or UTC.
-    # We should convert our JST range to the dataframe's timezone for accurate filtering.
+    print(f"Analyzing {start_str} to {end_str}...")
     
-    print(f"Analyzing {start_str} JST to {end_str} JST...")
+    data = fetch_data(start_str, end_str)
+    if data is None: return
 
-    # We need to pass the actual datetime objects to filter or convert to string properly
-    # Let's adjust filter_data_by_date to handle datetime objects directly to avoid confusion
-    
-    # Helper to run analysis with correct valid objects
-    def run_analysis_for_range(s_dt, e_dt):
-        index_res = []
-        for idx in INDICES:
-            res = analyze_ticker(idx, data, s_dt, e_dt)
-            if res: index_res.append(res)
-            
-        sec_results = {}
-        for sector, holdings in SECTORS.items():
-            res = analyze_sector(sector, holdings, data, s_dt, e_dt)
-            if res: sec_results[sector] = res
-            
-        if sec_results:
-            report_text = generate_narrative_report(sec_results, index_res, s_dt, e_dt)
-            return report_text
-        return "No data found for this range."
+    index_results = []
+    for idx in INDICES:
+        res = analyze_ticker(idx, data, start_str, end_str)
+        if res: index_results.append(res)
 
-    report = run_analysis_for_range(start_dt, end_dt)
-    
-    # Filename based on range for clarity if needed, or just standard
-    with open("analysis_output.txt", "w", encoding='utf-8') as f:
-        f.write(report)
-    print("Report Generated.")
+    macro_results = []
+    for m in MACRO_TICKERS:
+        res = analyze_ticker(m, data, start_str, end_str)
+        if res: macro_results.append(res)
+
+    results = {}
+    for sector, holdings in SECTORS.items():
+        res = analyze_sector(sector, holdings, data, start_str, end_str)
+        if res: results[sector] = res
+
+    if results:
+        report = generate_narrative_report(results, index_results, macro_results, start_str, end_str)
+        with open("analysis_output.txt", "w", encoding='utf-8') as f:
+            f.write(report)
+        print("Report Generated.")
 
 if __name__ == "__main__":
     main()
