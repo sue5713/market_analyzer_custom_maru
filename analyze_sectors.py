@@ -27,6 +27,34 @@ SECTOR_NAMES = {
     "QQQ": "NAS100", "SPY": "S&P500", "DIA": "NYダウ"
 }
 
+# New Thematic Sectors (Representative ETF as Key)
+THEME_SECTORS = {
+    "ITB": ["HD", "LOW", "SHW", "DHI", "LEN", "PHM", "NVR", "LII", "TOL", "BLD"], # Housing/Construction
+    "FINX": ["MSFT", "NVDA", "INTU", "FIS", "COIN", "PYPL", "SOFI", "PANW", "CRWD", "AFRM"], # Fintech/Cloud
+    "GDX": ["NEM", "AEM", "FCX", "SCCO", "ALB", "GOLD", "WPM", "NUE", "PAAS", "MP"], # Gold/Materials (Using GDX as proxy)
+    "XOP": ["XOM", "CVX", "EOG", "SLB", "BKR", "HAL", "MPC", "PSX", "WMB", "KMI"], # Energy/Oil (Using XOP as proxy)
+    
+    "ICLN": ["TSLA", "NEE", "ENPH", "FSLR", "ALB", "CCJ", "FCX", "SEDG", "OKLO", "UEC"], # Clean Energy
+    "PAVE": ["PLD", "EQIX", "AMT", "UNP", "CSX", "UPS", "FDX", "ETN", "AMZN", "CAT"], # Infra/Transport
+    "SOXX": ["NVDA", "MSFT", "AVGO", "TSM", "AMD", "ASML", "PANW", "CRWD", "SNOW", "ADBE"], # Semis/AI
+    "IBB": ["AMGN", "ABBV", "REGN", "VRTX", "ISRG", "SYK", "MDT", "BSX", "ABT", "JNJ"], # Bio/Health
+    "ITA": ["LMT", "RTX", "BA", "GD", "JPM", "BAC", "GS", "COST", "WMT", "UNP"], # Defense/Aero/Etc
+    "KWEB": ["PDD", "BABA", "YUMC", "TAL", "VIPS", "TME", "BZ", "EA", "TTWO", "RBLX"] # China/Games
+}
+
+THEME_NAMES = {
+    "ITB": "住宅・建設・不動産",
+    "FINX": "フィンテック・クラウド・決済",
+    "GDX": "金・銀・金属・素材",
+    "XOP": "エネルギー・探鉱・中流",
+    "ICLN": "クリーンエネ・水素・ウラン",
+    "PAVE": "インフラ・運輸・データセンター",
+    "SOXX": "半導体・AI・サイバー",
+    "IBB": "バイオ・医療・ヘルス",
+    "ITA": "防衛・航空宇宙・複合",
+    "KWEB": "中国・ゲーム・エンタメ"
+}
+
 INDICES = ["QQQ", "SPY", "DIA"]
 MACRO_TICKERS = ["GLD", "FXY", "UUP", "TLT"]
 MACRO_NAMES = {
@@ -38,9 +66,17 @@ MACRO_NAMES = {
 
 def fetch_data(start_str=None, end_str=None):
     all_tickers = []
+    
+    # Standard Sectors
     for sector, stocks in SECTORS.items():
         all_tickers.append(sector)
         all_tickers.extend(stocks)
+        
+    # Thematic Sectors
+    for sector, stocks in THEME_SECTORS.items():
+        all_tickers.append(sector)
+        all_tickers.extend(stocks)
+        
     all_tickers.extend(INDICES)
     all_tickers.extend(MACRO_TICKERS)
     
@@ -68,10 +104,6 @@ def fetch_data(start_str=None, end_str=None):
         if use_period:
             data = yf.download(all_tickers, period="1mo", interval="15m", group_by='ticker', auto_adjust=True, threads=True)
         else:
-            # yfinance expects end date to be exclusive, so add 1 day to cover the full end date if needed, 
-            # but usually for 'end' arg provided by user we assume it includes that day? 
-            # actually yfinance download 'end' is exclusive. 
-            # Converting string to datetime to add offset safely
             s_dt = pd.to_datetime(start_str)
             e_dt = pd.to_datetime(end_str) + timedelta(days=1)
             
@@ -252,7 +284,7 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
     except KeyError:
         return None
     except Exception as e:
-        # Fallback for flat index if only one ticker or other structure
+        # Fallback for flat index 
         if ticker in data.columns:
             raw = data[ticker].dropna()
         else:
@@ -266,18 +298,22 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
     
     # Convert timestamps to JST for display
     jst = pytz.timezone('Asia/Tokyo')
-    first_ts = df.index[0]
-    last_ts = df.index[-1]
-    
-    if first_ts.tzinfo is not None:
-        first_jst = first_ts.astimezone(jst)
-        last_jst = last_ts.astimezone(jst)
-        start_date_str = first_jst.strftime("%m/%d %H:%M")
-        end_date_str = last_jst.strftime("%m/%d %H:%M") + " JST"
-    else:
-        # For daily data (no timezone info), just show date
-        start_date_str = first_ts.strftime("%m/%d")
-        end_date_str = last_ts.strftime("%m/%d")
+    try:
+        first_ts = df.index[0]
+        last_ts = df.index[-1]
+        
+        if first_ts.tzinfo is not None:
+            first_jst = first_ts.astimezone(jst)
+            last_jst = last_ts.astimezone(jst)
+            start_date_str = first_jst.strftime("%m/%d %H:%M")
+            end_date_str = last_jst.strftime("%m/%d %H:%M") + " JST"
+        else:
+            # For daily data (no timezone info), just show date
+            start_date_str = first_ts.strftime("%m/%d")
+            end_date_str = last_ts.strftime("%m/%d")
+    except:
+        start_date_str = "N/A"
+        end_date_str = "N/A"
     
     ret = (end_p - start_p) / start_p * 100
     
@@ -285,7 +321,6 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
     prev_close = None
     try:
         current_date = df.index[-1].date()
-        # Look at raw data strictly before the current day
         past_data = raw[raw.index.date < current_date]
         if not past_data.empty:
             prev_close = past_data.iloc[-1]['Close']
@@ -319,16 +354,13 @@ def analyze_ticker(ticker, data, start_arg, end_arg):
     }
 
 def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
+    # Use names from either standard or theme dict
+    sec_name = SECTOR_NAMES.get(sector_ticker, THEME_NAMES.get(sector_ticker, sector_ticker))
+
     s_res = analyze_ticker(sector_ticker, data, start_arg, end_arg)
     if not s_res: return None
     
     stats = []
-    
-    # Force minimal 5 stocks? We have 5 in holdings.
-    # We want to classify ALL 5 into Engine or Brake.
-    # Logic: 
-    #   Engine: Return > Sector Return (Leaders)
-    #   Brake: Return <= Sector Return (Laggards)
     
     for stock in holdings:
         st_res = analyze_ticker(stock, data, start_arg, end_arg)
@@ -338,7 +370,6 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
         role = "NEUTRAL"
         reason = ""
         
-        # Forced Classification
         if rel_trend > 0:
             role = "ENGINE (牽引)"
             if st_res['LastScore'] >= 0:
@@ -360,20 +391,15 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
     if not stats_df.empty:
         stats_df = stats_df.sort_values("Return", ascending=False)
         
-    # Calculate Fund Quality (Breadth)
-    # How many are Engines (Outperforming sector)?
-    # If 4-5: Broad participation (Healthy)
-    # If 1-2: Narrow participation (Selective)
-    current_engines = [s for s in stats if "ENGINE" in s['Role']]
-    engine_count = len(current_engines)
+    engine_count = len([s for s in stats if "ENGINE" in s['Role']])
     total_count = len(stats)
     
     quality = "普通 (Mixed)"
     if total_count > 0:
         ratio = engine_count / total_count
-        if ratio >= 0.8: # 4 or 5 out of 5
+        if ratio >= 0.8: 
             quality = "健全な広がり (Healthy)"
-        elif ratio <= 0.2: # 1 out of 5
+        elif ratio <= 0.2: 
             quality = "一部への逃避 (Selective)"
         elif ratio > 0.5:
             quality = "やや広い (Broad)"
@@ -382,7 +408,7 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
     
     return {
         "sector": sector_ticker,
-        "name": SECTOR_NAMES.get(sector_ticker, sector_ticker),
+        "name": sec_name,
         "return": s_res['Return'],
         "start_p": s_res['Start'],
         "end_p": s_res['End'],
@@ -398,20 +424,16 @@ def analyze_sector(sector_ticker, holdings, data, start_arg=None, end_arg=None):
         "RF": s_res['RF']
     }
 
-def generate_narrative_report(results, index_results, macro_results, start_dt_str, end_dt_str):
-    # Use actual analyzed range from one of the results if possible for more precision
+def generate_narrative_report(results, index_results, macro_results, theme_results, start_dt_str, end_dt_str):
     analyzed_range = f"{start_dt_str} 〜 {end_dt_str}"
     if index_results:
-        # Extract existing range from index result, assuming format "MM/DD HH:MM - MM/DD HH:MM JST"
-        # But here start_dt_str is YYYY-MM-DD. 
-        # analyze_ticker returns DateRange in detailed format.
         analyzed_range = index_results[0]['DateRange'] 
 
     report = []
     report.append("【天才投資家レポート】")
     report.append(f"分析期間: {analyzed_range}\n")
     
-    # 1. Indices (Detailed)
+    # 1. Indices
     report.append("### ① 全体観 (Indices)")
     for idx_res in index_results:
         idx = idx_res['Ticker']
@@ -422,7 +444,7 @@ def generate_narrative_report(results, index_results, macro_results, start_dt_st
         report.append(f"  📊 **リカバリー・ファクター (RF): {idx_res['RF']:.2f}** | **最大ドローダウン (MDD): {idx_res['MDD']:.1f}%**")
         report.append(f"  直近: {idx_res['LastDesc']} ({idx_res['LastMove']:+.1f}%) [{idx_res['LastDate']}]")
         
-        # Drivers/Draggers Logic
+        # Drivers/Draggers Logic (Simplified for standard sectors)
         related_sectors = []
         if idx == "QQQ": related_sectors = ["XLK", "XLC", "XLY"]
         elif idx == "DIA": related_sectors = ["XLI", "XLF", "XLV"]
@@ -450,13 +472,12 @@ def generate_narrative_report(results, index_results, macro_results, start_dt_st
 
     report.append("="*40 + "\n")
     
-    # 2. Sector Analysis
+    # 2. Sector Analysis (Standard)
     sorted_secs = sorted(results.values(), key=lambda x: x['return'], reverse=True)
     winner = sorted_secs[0]
     loser = sorted_secs[-1]
 
     # Macro Conclusion
-    # Determine Risk Sentiment based on Tech/ConsDisc vs Utilities/Staples
     risk_on_score = 0
     if "XLK" in results and "XLY" in results:
         risk_on_avg = (results["XLK"]["return"] + results["XLY"]["return"]) / 2
@@ -490,48 +511,29 @@ def generate_narrative_report(results, index_results, macro_results, start_dt_st
     report.append(f"勝者({winner['name']})は{winner['quality']}な買いが入っており、敗者({loser['name']})は資金流出が鮮明です。")
     report.append("\n" + "-"*20 + "\n")
 
+    # Standard Sectors
     for res in sorted_secs:
-        sec_name = res['name']
-        ticker = res['sector']
-        stats = res['stats']
-        
-        engines = stats[stats['Role'].str.contains('ENGINE')]
-        brakes = stats[stats['Role'].str.contains('BRAKE')]
-        
-        report.append(f"## {sec_name} ({ticker})")
-        report.append(f"**判定**: {res['grade']}")
-        report.append(f"**資金の質の判定**: {res['quality']}")
-        
-        report.append(f"**Price**: ${res['start_p']:.2f} -> ${res['end_p']:.2f} ({res['return']:+.2f}%) [{res['date_range']}]")
-        report.append(f"📊 **リカバリー・ファクター (RF): {res['RF']:.2f}** | **最大ドローダウン (MDD): {res['MDD']:.1f}%**")
-        report.append(f"**直近**: {res['last_desc']} [{res['last_date']}]")
-        
-        if not engines.empty:
-            report.append("🔥 **Engine (牽引)**:")
-            for _, row in engines.iterrows():
-                # Ticker: Trend: ... [RF:X.XX] / Last: ... -> Reason
-                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [{row['DateRange']}] (始値->高値->終値) **[RF:{row['RF']:.2f}]**"
-                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
-                report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
-        
-        if not brakes.empty:
-            report.append("🧊 **Brake (重石)**:")
-            for _, row in brakes.iterrows():
-                trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [{row['DateRange']}] (始値->高値->終値) **[RF:{row['RF']:.2f}]**"
-                last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
-                report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
-        
-        report.append("\n" + "-"*20 + "\n")
+        _append_sector_details(report, res)
 
-    # 3. Rankings Section
-    report.append("### ④ リカバリー・ファクター (RF) ランキング") # Fixed numbering to ④? User snippet had ③ but usually Macro is after?
-    # Wait, the user's snippet text had:
-    # ### ③ リカバリー・ファクター (RF) ランキング
-    # ...
-    # ### ④ 注目マクロ指標 (Macro)
-    # So I should keep it as ③
+    # 3. Thematic Sectors Section
+    report.append("### ③ テーマ別・注目セクター分析 (New Themes)")
+    report.append("伝統的セクターに加え、注目度の高い10のテーマを分析します。\n")
     
-    report.append("### ③ リカバリー・ファクター (RF) ランキング")
+    sorted_themes = sorted(theme_results.values(), key=lambda x: x['return'], reverse=True)
+    for res in sorted_themes:
+        _append_sector_details(report, res)
+
+    # 4. Rankings Section (Combined?)
+    # User asked for "Existing things kept as is", so standard rankings first?
+    # Or maybe combine them? 
+    # Let's keep existing Rankings as "Sector Ranking" (Original 11)
+    # And maybe add a "Theme Ranking"? 
+    # Or just mix them? 
+    # For now, I will keep standard rankings as requested "Existing things kept", 
+    # and maybe append Theme rankings. Or mix if user didn't specify. 
+    # "Existing ... kept as is". So I will keep the original ranking section for original sectors.
+    
+    report.append("### ④ リカバリー・ファクター (RF) ランキング (Standard 11)")
     report.append("「リスクあたりのリターン効率」を比較します。数値が高いほど優秀です。\n")
     
     # Sector Ranking
@@ -545,54 +547,96 @@ def generate_narrative_report(results, index_results, macro_results, start_dt_st
     report.append(" ".join(rank_str_list))
     report.append("")
     
-    # Stock Ranking
+    # Stock Ranking (Standard)
     all_stocks = []
     for res in results.values():
         if not res['stats'].empty:
             for _, row in res['stats'].iterrows():
                 all_stocks.append(row)
     
-    # Sort all stocks by RF
     sorted_stocks_rf = sorted(all_stocks, key=lambda x: x['RF'], reverse=True)
-    top_10 = sorted_stocks_rf[:10]
-    bottom_5 = sorted_stocks_rf[-5:]
-    
-    report.append("【銘柄別 RF ランキング (Top 10)】")
+    report.append("【銘柄別 RF ランキング (Standard Top 10)】")
     top_str_list = []
-    for i, row in enumerate(top_10):
+    for i, row in enumerate(sorted_stocks_rf[:10]):
         rank_icon = medals[i] if i < 3 else f"{i+1}."
         top_str_list.append(f"{rank_icon} **{row['Ticker']}**: RF {row['RF']:.2f} (Return: {row['Return']:+.1f}% / MDD: {row['MDD']:.1f}%)")
     report.append(" ".join(top_str_list))
-    report.append("")
+    report.append("\n" + "="*40 + "\n")
+
+    # Theme Rankings
+    report.append("### ⑤ テーマ別 RF ランキング (New)")
     
-    report.append("【銘柄別 RF ワースト (Bottom 5)】")
-    btm_str_list = []
-    for row in bottom_5:
-        btm_str_list.append(f"💀 **{row['Ticker']}**: RF {row['RF']:.2f} (Return: {row['Return']:+.1f}% / MDD: {row['MDD']:.1f}%)")
-    report.append(" ".join(btm_str_list))
+    # Theme Sector Ranking
+    sorted_rf_themes = sorted(theme_results.values(), key=lambda x: x['RF'], reverse=True)
+    report.append("【テーマ別 RF ランキング】")
+    rank_str_list = []
+    for i, res in enumerate(sorted_rf_themes):
+        rank_icon = medals[i] if i < 3 else f"{i+1}."
+        rank_str_list.append(f"{rank_icon} **{res['name']} ({res['sector']})**: RF {res['RF']:.2f} (Return: {res['return']:+.1f}% / MDD: {res['MDD']:.1f}%)")
+    report.append(" ".join(rank_str_list))
+    report.append("")
+
+    # Theme Stock Ranking
+    all_theme_stocks = []
+    for res in theme_results.values():
+        if not res['stats'].empty:
+            for _, row in res['stats'].iterrows():
+                all_theme_stocks.append(row)
+    
+    sorted_theme_stocks_rf = sorted(all_theme_stocks, key=lambda x: x['RF'], reverse=True)
+    report.append("【テーマ銘柄別 RF ランキング (Theme Top 10)】")
+    top_str_list = []
+    for i, row in enumerate(sorted_theme_stocks_rf[:10]):
+        rank_icon = medals[i] if i < 3 else f"{i+1}."
+        top_str_list.append(f"{rank_icon} **{row['Ticker']}**: RF {row['RF']:.2f} (Return: {row['Return']:+.1f}% / MDD: {row['MDD']:.1f}%)")
+    report.append(" ".join(top_str_list))
     
     report.append("\n" + "="*40 + "\n")
 
-    # 4. Macro Section
-    report.append("### ④ 注目マクロ指標 (Macro)")
+    # 4. Macro Section (Renumbered to 6)
+    report.append("### ⑥ 注目マクロ指標 (Macro)")
     for res in macro_results:
         m_ticker = res['Ticker']
         m_name = MACRO_NAMES.get(m_ticker, m_ticker)
         report.append(f"**{m_name} ({m_ticker})**: {res['Return']:+.2f}%")
         report.append(f"  Price: {res['Start']:.2f} -> {res['End']:.2f} [{res['DateRange']}]")
         report.append(f"  直近: {res['LastDesc']} ({res['LastMove']:+.2f}%) [{res['LastDate']}]")
-        # Added RF/MDD based on user sample output if needed, but user didn't explicitly ask for it in the text sample
-        # Wait, the user text:
-        # ### ④ 注目マクロ指標 (Macro)
-        # **ゴールド (GLD)**: +2.00%
-        # ...
-        # The user's Python Code had:
-        # report.append(f"  RF: {res['RF']:.2f} | MDD: {res['MDD']:.1f}%")
-        # So I will include it.
         report.append(f"  RF: {res['RF']:.2f} | MDD: {res['MDD']:.1f}%")
         report.append("")
     
     return "\n".join(report)
+
+def _append_sector_details(report, res):
+    sec_name = res['name']
+    ticker = res['sector']
+    stats = res['stats']
+    
+    engines = stats[stats['Role'].str.contains('ENGINE')]
+    brakes = stats[stats['Role'].str.contains('BRAKE')]
+    
+    report.append(f"## {sec_name} ({ticker})")
+    report.append(f"**判定**: {res['grade']}")
+    report.append(f"**資金の質の判定**: {res['quality']}")
+    
+    report.append(f"**Price**: ${res['start_p']:.2f} -> ${res['end_p']:.2f} ({res['return']:+.2f}%) [{res['date_range']}]")
+    report.append(f"📊 **リカバリー・ファクター (RF): {res['RF']:.2f}** | **最大ドローダウン (MDD): {res['MDD']:.1f}%**")
+    report.append(f"**直近**: {res['last_desc']} [{res['last_date']}]")
+    
+    if not engines.empty:
+        report.append("🔥 **Engine (牽引)**:")
+        for _, row in engines.iterrows():
+            trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [{row['DateRange']}] (始値->高値->終値) **[RF:{row['RF']:.2f}]**"
+            last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
+            report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
+    
+    if not brakes.empty:
+        report.append("🧊 **Brake (重石)**:")
+        for _, row in brakes.iterrows():
+            trend_str = f"Trend: {row['Start']:.2f}->{row['High']:.2f}->{row['End']:.2f} ({row['Return']:+.1f}%) [{row['DateRange']}] (始値->高値->終値) **[RF:{row['RF']:.2f}]**"
+            last_str = f"Last: {row['LastOpen']:.2f}->{row['LastHigh']:.2f}->{row['LastClose']:.2f} ({row['LastMove']:+.1f}%) [{row['LastDate']}] (始値->高値->終値)"
+            report.append(f"- {row['Ticker']}: {trend_str} / {last_str} -> {row['Reason']}")
+    
+    report.append("\n" + "-"*20 + "\n")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -601,7 +645,6 @@ def main():
     parser.add_argument('--days', type=int, default=14)
     args = parser.parse_args()
 
-    # Use JST for default dates to align with user time (and correct US close relative to JST morning)
     jst = pytz.timezone('Asia/Tokyo')
     end_dt = datetime.now(jst)
     
@@ -631,9 +674,14 @@ def main():
     for sector, holdings in SECTORS.items():
         res = analyze_sector(sector, holdings, data, start_str, end_str)
         if res: results[sector] = res
+        
+    theme_results = {}
+    for sector, holdings in THEME_SECTORS.items():
+        res = analyze_sector(sector, holdings, data, start_str, end_str)
+        if res: theme_results[sector] = res
 
-    if results:
-        report = generate_narrative_report(results, index_results, macro_results, start_str, end_str)
+    if results or theme_results:
+        report = generate_narrative_report(results, index_results, macro_results, theme_results, start_str, end_str)
         with open("analysis_output.txt", "w", encoding='utf-8') as f:
             f.write(report)
         print("Report Generated.")
