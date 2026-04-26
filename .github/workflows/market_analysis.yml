@@ -31,15 +31,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run Market Analysis
-      run: |
-        if [ -n "${{ inputs.start_date }}" ] && [ -n "${{ inputs.end_date }}" ]; then
-          python analyze_sectors.py --start "${{ inputs.start_date }}" --end "${{ inputs.end_date }}"
-        else
-          python analyze_sectors.py --days 14
-        fi
-      
-    - name: Send to Discord
+    - name: Run analysis with baseline
       env:
         DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-      run: python notify_discord.py
+      run: |
+        if [ -n "${{ inputs.start_date }}" ] && [ -n "${{ inputs.end_date }}" ]; then
+          python run_with_baseline.py --start "${{ inputs.start_date }}" --end "${{ inputs.end_date }}"
+        else
+          python run_with_baseline.py --days 14
+        fi
