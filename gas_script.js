@@ -18,7 +18,7 @@
 
 const CONFIG = {
   GITHUB_OWNER: 'sue5713',       // Your GitHub Username
-  GITHUB_REPO: 'market_analyzer_custom', // Your Repository Name
+  GITHUB_REPO: 'market_analyzer_custom_maru', // Your Repository Name
   WORKFLOW_FILE: 'market_analysis.yml',  // The workflow filename
   GITHUB_TOKEN: 'YOUR_GITHUB_PAT_HERE'   // PASTE YOUR GITHUB PAT HERE (Keep the quotes)
 };
