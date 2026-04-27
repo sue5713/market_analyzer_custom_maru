@@ -40,3 +40,8 @@ jobs:
         else
           python run_with_baseline.py --days 14
         fi
+
+    - name: Send to Discord
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: python notify_discord.py
